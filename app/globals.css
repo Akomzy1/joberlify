@@ -216,6 +216,21 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--navy-950);
 }
 
+/* ─── Noise Texture Overlay ──────────────────────────────────────────────────
+   Fixed overlay for subtle tactile depth. Pointer-events none so it never
+   blocks interaction. z-index 9999 ensures it sits above all content.
+   ─────────────────────────────────────────────────────────────────────────── */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 200px 200px;
+}
+
 /* ─── Radar Chart Draw-in Animation ─────────────────────────────────────────*/
 .animate-draw-in {
   stroke-dasharray: 1000;
