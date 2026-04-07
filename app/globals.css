@@ -1,26 +1,228 @@
 @import "tailwindcss";
+@import "@fontsource/dm-sans/400.css";
+@import "@fontsource/dm-sans/500.css";
+@import "@fontsource/dm-sans/700.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* ─── Joberlify Design System ────────────────────────────────────────────────
+   Precision Intelligence — refined editorial meets data dashboard.
+   Confident restraint with warm authority. Bloomberg terminal × premium magazine.
+   ─────────────────────────────────────────────────────────────────────────── */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@theme {
+  /* Colour Palette */
+  --color-navy-950: #0A1628;
+  --color-navy-900: #1E3A5F;
+  --color-navy-800: #1E4976;
+  --color-navy-700: #2563A0;
+  --color-teal-500: #0EA5E9;
+  --color-teal-400: #38BDF8;
+  --color-teal-100: #E0F2FE;
+  --color-cream-50:  #FAFAF8;
+  --color-cream-100: #F5F3EF;
+  --color-cream-200: #E8E4DD;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  /* Grade Colours */
+  --color-grade-a: #22C55E;
+  --color-grade-b: #0EA5E9;
+  --color-grade-c: #F59E0B;
+  --color-grade-d: #F97316;
+  --color-grade-f: #EF4444;
+
+  /* Visa Status Colours */
+  --color-visa-confirmed: #22C55E;
+  --color-visa-likely:    #F59E0B;
+  --color-visa-uncertain: #F97316;
+  --color-visa-unlikely:  #EF4444;
+  --color-visa-blocked:   #991B1B;
+
+  /* Typography */
+  --font-family-sans:    'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-family-display: 'Satoshi', 'DM Sans', ui-sans-serif, sans-serif;
+  --font-family-mono:    'JetBrains Mono', ui-monospace, monospace;
+
+  /* Modular Type Scale (1.25× ratio, base 16px) */
+  --font-size-xs:   0.8rem;    /* ~13px  */
+  --font-size-sm:   0.875rem;  /* 14px   */
+  --font-size-base: 1rem;      /* 16px   */
+  --font-size-lg:   1.25rem;   /* 20px   */
+  --font-size-xl:   1.563rem;  /* 25px   */
+  --font-size-2xl:  1.953rem;  /* 31px   */
+  --font-size-3xl:  2.441rem;  /* 39px   */
+  --font-size-4xl:  3.052rem;  /* 49px   */
+
+  /* Border Radius — sharp, editorial */
+  --radius-sm:      4px;
+  --radius:         8px;
+  --radius-md:      8px;
+  --radius-lg:      12px;
+  --radius-xl:      16px;
+  --radius-full:    9999px;
+
+  /* Shadows — minimal, purposeful */
+  --shadow-sm:      0 1px 2px rgba(10, 22, 40, 0.05);
+  --shadow:         0 2px 8px rgba(10, 22, 40, 0.08);
+  --shadow-md:      0 4px 16px rgba(10, 22, 40, 0.10);
+  --shadow-lg:      0 8px 32px rgba(10, 22, 40, 0.12);
+
+  /* Spacing scale (4px base) */
+  --spacing-px:   1px;
+  --spacing-0:    0px;
+  --spacing-1:    4px;
+  --spacing-2:    8px;
+  --spacing-3:    12px;
+  --spacing-4:    16px;
+  --spacing-5:    20px;
+  --spacing-6:    24px;
+  --spacing-8:    32px;
+  --spacing-10:   40px;
+  --spacing-12:   48px;
+  --spacing-16:   64px;
+  --spacing-20:   80px;
+  --spacing-24:   96px;
+
+  /* Animations */
+  --animate-fade-in-up:    fadeInUp 0.4s ease-out both;
+  --animate-slide-in-right: slideInRight 0.3s ease-out both;
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes countUp {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes drawIn {
+    from { stroke-dashoffset: 1000; }
+    to   { stroke-dashoffset: 0; }
+  }
+
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 }
 
+/* ─── CSS Custom Properties ──────────────────────────────────────────────────
+   Available globally for use in inline styles and non-Tailwind contexts
+   ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  --navy-950: #0A1628;
+  --navy-900: #1E3A5F;
+  --navy-800: #1E4976;
+  --navy-700: #2563A0;
+  --teal-500:  #0EA5E9;
+  --teal-400:  #38BDF8;
+  --teal-100:  #E0F2FE;
+  --cream-50:  #FAFAF8;
+  --cream-100: #F5F3EF;
+  --cream-200: #E8E4DD;
+
+  --grade-a: #22C55E;
+  --grade-b: #0EA5E9;
+  --grade-c: #F59E0B;
+  --grade-d: #F97316;
+  --grade-f: #EF4444;
+
+  --visa-confirmed: #22C55E;
+  --visa-likely:    #F59E0B;
+  --visa-uncertain: #F97316;
+  --visa-unlikely:  #EF4444;
+  --visa-blocked:   #991B1B;
+}
+
+/* ─── Base Styles ────────────────────────────────────────────────────────────*/
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100%;
+  background-color: var(--cream-50);
+  color: var(--navy-950);
+  font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* ─── Focus Ring ─────────────────────────────────────────────────────────────*/
+:focus-visible {
+  outline: 2px solid var(--teal-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Selection ──────────────────────────────────────────────────────────────*/
+::selection {
+  background-color: var(--teal-100);
+  color: var(--navy-950);
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────────*/
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--cream-100);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--navy-700);
+  border-radius: 3px;
+  opacity: 0.4;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--navy-900);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--navy-700) var(--cream-100);
+}
+
+/* ─── Typography Defaults ────────────────────────────────────────────────────*/
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Satoshi', 'DM Sans', ui-sans-serif, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--navy-950);
+}
+
+/* ─── Radar Chart Draw-in Animation ─────────────────────────────────────────*/
+.animate-draw-in {
+  stroke-dasharray: 1000;
+  animation: drawIn 1.2s ease-out forwards;
+}
+
+/* ─── Count-up Number Animation ─────────────────────────────────────────────*/
+.animate-count-up {
+  animation: countUp 0.6s ease-out both;
 }
