@@ -24,13 +24,16 @@ description: >
 
 ## Product Overview
 
-Joberlify serves two audiences from one platform:
+Joberlify is your personal AI recruitment agent. Traditional job sites feature thousands of irrelevant listings and leave you to scroll. Joberlify flips this — it learns who you are first (skills, experience, career direction, visa needs), then proactively scans company career pages, filters out irrelevant roles, and surfaces only the opportunities where you have a genuine match. Every listing you see has already been scored against your profile.
 
-1. **Standard job seekers** — professionals searching for roles locally or where they have work authorisation. They get AI fit scoring, tailored CVs, interview prep, and the "Not Yet" quality-first philosophy.
+It serves two audiences from one platform:
+
+1. **Standard job seekers** — professionals searching for roles locally or where they have work authorisation. They get proactive job discovery, AI fit scoring, tailored CVs, interview prep, and the "Not Yet" quality-first philosophy.
 2. **International job seekers** — everything above plus visa sponsorship intelligence: sponsor verification, occupation code eligibility, salary threshold validation, and post-placement Sponsor Watch.
 
 ### Core Philosophy
 
+- **Jobs find you, not the other way around.** Joberlify scans career pages on your behalf and surfaces matched roles automatically.
 - **Quality over quantity.** Joberlify tells users when NOT to apply and gives actionable guidance to close gaps.
 - **"Not Yet", not "No".** Every rejection includes specific gaps, guidance, and alternative roles the user IS ready for.
 - **Human-in-the-loop.** Joberlify never auto-submits applications. The user always decides.
@@ -109,7 +112,7 @@ joberlify/
 | 4 | Growth Trajectory | Whether this role advances the candidate's career direction |
 | 5 | Culture Fit | Company values and working style alignment |
 | 6 | Compensation | Whether salary meets candidate expectations and market rate |
-| 7 | Location Fit | Location compatibility with candidate preferences/constraints |
+| 7 | Location Fit | Does job location match user's target cities/regions, remote preference, and commute limits? Score 5.0 for exact city match or remote when user prefers remote. Score 1.0 if outside all target locations. |
 | 8 | Company Stage | Company size/stage match (startup vs enterprise preference) |
 | 9 | Role Impact | Whether the role offers meaningful ownership and visibility |
 | 10 | Long-term Value | Whether it builds compounding skills, network, or credentials |
@@ -213,7 +216,7 @@ Standalone pricing: $4.99/month for users who only need monitoring.
 | Table | Purpose |
 |---|---|
 | `users` | Auth, subscription tier, Stripe IDs |
-| `user_profiles` | Nationality, targets, visa needs, parsed CV, skills, qualifications |
+| `user_profiles` | Nationality, target countries + cities/regions, remote preference, commute limits, visa needs, parsed CV, skills, qualifications |
 | `evaluations` | 10 scores + visa score + grade + recommendation + gap report |
 | `generated_cvs` | PDF URLs, format, linked to evaluation |
 | `pipeline` | Status tracking: evaluated → applying → applied → interviewing → offer → hired |

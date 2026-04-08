@@ -36,18 +36,31 @@ export interface WorkHistoryEntry {
   description: string
 }
 
+export type RemotePreference = 'onsite_only' | 'hybrid' | 'remote_only' | 'open'
+
+export interface TargetLocation {
+  country: string   // ISO country code e.g. 'GB'
+  cities: string[]  // empty when anywhere = true
+  anywhere: boolean // true = no city restriction within this country
+}
+
 export interface UserProfile {
   id: string
   userId: string
   fullName: string | null
   nationality: string | null
   currentCountry: string | null
+  currentCity: string | null
   targetCountries: string[]
+  targetLocations: TargetLocation[]
+  remotePreference: RemotePreference
+  willingnessToRelocate: boolean
+  maxCommuteMiles: number | null
   requiresVisaSponsorship: boolean
+  currentVisaStatus: string | null
   preferredJobTypes: ('full_time' | 'part_time' | 'contract' | 'freelance')[]
   preferredSalaryMin: number | null
   preferredSalaryCurrency: string | null
-  preferredLocations: string[]
   cvParsedData: CvParsedData | null
   cvUploadedAt: string | null
   cvFileUrl: string | null
