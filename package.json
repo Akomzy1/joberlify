@@ -8,9 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "type-check": "tsc --noEmit",
-    "seed:soc-codes": "tsx data/seed/seed-soc-codes.ts",
-    "seed:sponsors": "tsx data/seed/seed-sponsors.ts",
-    "ingest:sponsors": "tsx supabase/functions/ingest-sponsors/index.ts"
+    "seed:soc-codes": "npx tsx scripts/seed-soc-codes.ts",
+    "seed:sponsors": "npx tsx scripts/ingest-sponsors.ts",
+    "ingest:sponsors": "npx tsx scripts/ingest-sponsors.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.85.0",
