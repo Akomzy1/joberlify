@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { X, ChevronDown, Check, Loader2, ChevronRight, Save } from 'lucide-react'
+import { X, ChevronDown, Check, Loader2, ChevronRight, Save, CreditCard, FileText, ExternalLink } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils/cn'
-import type { RemotePreference, TargetLocation } from '@/types'
+import { CvUploader } from '@/components/cv/CvUploader'
+import type { RemotePreference, TargetLocation, CvParsedData } from '@/types'
 
 // ─── Shared data (same as onboarding) ────────────────────────────────────────
 
@@ -269,26 +270,62 @@ export default function SettingsPage() {
   const [nationality, setNationality] = useState('')
   const [currentVisaStatus, setCurrentVisaStatus] = useState('')
 
+  // CV
+  const [cvParsedData, setCvParsedData] = useState<CvParsedData | null>(null)
+  const [cvUploadedAt, setCvUploadedAt] = useState<string | null>(null)
+
+  // Subscription
+  const [stripePortalLoading, setStripePortalLoading] = useState(false)
+  const [subscriptionTier, setSubscriptionTier] = useState<string>('free')
+
   useEffect(() => {
     async function load() {
-      const { data } = await supabase.from('user_profiles').select('*').single()
-      if (data) {
-        setJobTitles(data.job_titles ?? [])
-        setTargetCountries(data.target_countries ?? [])
-        setTargetLocations(data.target_locations ?? [])
-        setRemotePreference(data.remote_preference ?? 'open')
-        setWillingnessToRelocate(data.willingness_to_relocate ?? true)
-        setCurrentCity(data.current_city ?? '')
-        setCurrentCountry(data.current_country ?? '')
-        setMaxCommuteMiles(data.max_commute_miles ?? null)
-        setRequiresVisa(data.requires_visa_sponsorship ?? false)
-        setNationality(data.nationality ?? '')
-        setCurrentVisaStatus(data.current_visa_status ?? '')
+      const [profileRes, userRes] = await Promise.all([
+        supabase.from('user_profiles').select('*').single(),
+        supabase.from('users').select('subscription_tier, subscription_status').single(),
+      ])
+      if (profileRes.data) {
+        const d = profileRes.data
+        setJobTitles(d.job_titles ?? [])
+        setTargetCountries(d.target_countries ?? [])
+        setTargetLocations(d.target_locations ?? [])
+        setRemotePreference(d.remote_preference ?? 'open')
+        setWillingnessToRelocate(d.willingness_to_relocate ?? true)
+        setCurrentCity(d.current_city ?? '')
+        setCurrentCountry(d.current_country ?? '')
+        setMaxCommuteMiles(d.max_commute_miles ?? null)
+        setRequiresVisa(d.requires_visa_sponsorship ?? false)
+        setNationality(d.nationality ?? '')
+        setCurrentVisaStatus(d.current_visa_status ?? '')
+        setCvParsedData(d.cv_parsed_data ?? null)
+        setCvUploadedAt(d.cv_uploaded_at ?? null)
+      }
+      if (userRes.data) {
+        setSubscriptionTier(userRes.data.subscription_tier ?? 'free')
       }
       setLoading(false)
     }
     load()
   }, [supabase])
+
+  const handleCvConfirm = useCallback(async (data: CvParsedData) => {
+    setCvParsedData(data)
+    await save('cv', {
+      cv_parsed_data: data,
+      skills: data.skills.slice(0, 30),
+      career_summary: data.careerSummary,
+      cv_uploaded_at: new Date().toISOString(),
+    })
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function openStripePortal() {
+    setStripePortalLoading(true)
+    const res = await fetch('/api/billing/portal', { method: 'POST' })
+    const json = await res.json()
+    if (json.url) window.location.href = json.url
+    else setError('Could not open billing portal. Please try again.')
+    setStripePortalLoading(false)
+  }
 
   function toggleCountry(code: string) {
     if (targetCountries.includes(code)) {
@@ -443,6 +480,73 @@ export default function SettingsPage() {
             nationality: nationality || null,
             current_visa_status: currentVisaStatus || null,
           })} />
+      </Section>
+
+      {/* ── CV ── */}
+      <Section
+        title="Your CV"
+        description={cvUploadedAt
+          ? `Last uploaded ${new Date(cvUploadedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`
+          : 'No CV uploaded yet.'}
+      >
+        {cvParsedData && (
+          <div className="flex items-center gap-3 p-3 bg-[#F5F3EF] rounded-lg border border-[#E8E4DD] mb-2">
+            <FileText size={16} className="text-[#1E4976] flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-[#0A1628] truncate">
+                {cvParsedData.contactDetails?.name ?? 'CV on file'}
+              </p>
+              <p className="text-xs text-[#0A1628]/50">
+                {cvParsedData.skills.length} skills · {cvParsedData.jobHistory.length} roles · {cvParsedData.qualifications.length} qualifications
+              </p>
+            </div>
+          </div>
+        )}
+        <CvUploader
+          initialData={cvParsedData}
+          onConfirm={handleCvConfirm}
+        />
+      </Section>
+
+      {/* ── Subscription ── */}
+      <Section title="Subscription" description="Manage your plan and billing.">
+        <div className="flex items-center justify-between p-4 bg-[#F5F3EF] rounded-lg border border-[#E8E4DD]">
+          <div>
+            <p className="text-sm font-semibold text-[#0A1628] capitalize">{subscriptionTier} plan</p>
+            <p className="text-xs text-[#0A1628]/50 mt-0.5">
+              {subscriptionTier === 'free' && '3 evaluations / month'}
+              {subscriptionTier === 'pro' && '30 evaluations · 10 CVs · Interview prep'}
+              {subscriptionTier === 'global' && 'Unlimited evaluations · Batch mode · Sponsor Watch'}
+            </p>
+          </div>
+          {subscriptionTier === 'free' && (
+            <a
+              href="/pricing"
+              className="text-xs font-semibold text-[#0EA5E9] hover:underline"
+            >
+              Upgrade
+            </a>
+          )}
+        </div>
+
+        {subscriptionTier !== 'free' && (
+          <button
+            type="button"
+            onClick={openStripePortal}
+            disabled={stripePortalLoading}
+            className={cn(
+              'w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium',
+              'border border-[#E8E4DD] text-[#0A1628] bg-white',
+              'hover:bg-[#F5F3EF] transition-colors duration-150',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0EA5E9] focus-visible:ring-offset-2',
+            )}
+          >
+            {stripePortalLoading
+              ? <><Loader2 size={14} className="animate-spin" /> Opening portal…</>
+              : <><CreditCard size={14} /> Manage billing &amp; invoices <ExternalLink size={12} className="text-[#0A1628]/40" /></>}
+          </button>
+        )}
       </Section>
     </div>
   )
