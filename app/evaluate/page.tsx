@@ -1,498 +1,415 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { Briefcase, Building2, MapPin, DollarSign, Link2, ChevronDown, ChevronUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, ArrowRight, Sparkles } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
-import { GapReport } from '@/components/evaluation/GapReport'
-import type { GapReport as GapReportType, GrowthRoadmapItem } from '@/types/evaluation'
+import type { JobListing } from '@/types/JobListing'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Loading stages ───────────────────────────────────────────────────────────
 
-interface EvaluationResult {
-  id: string | null
-  scores: Record<string, number>
-  overallScore: number
-  grade: 'A' | 'B' | 'C' | 'D' | 'F'
-  recommendation: 'apply' | 'consider' | 'not_yet' | 'dont_apply'
-  evaluationSummary: string
-  locationMatch: {
-    jobLocation: string
-    userTargets: string
-    isMatch: boolean
-    detail: string
-  } | null
-  gapReport: GapReportType | null
-  requiresVisaSponsorship: boolean
-}
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const DIMENSION_LABELS: Record<string, string> = {
-  role_match: 'Role Match',
-  skills_alignment: 'Skills Alignment',
-  experience_level: 'Experience Level',
-  growth_trajectory: 'Growth Trajectory',
-  culture_fit: 'Culture Fit',
-  compensation: 'Compensation',
-  location_fit: 'Location Fit',
-  company_stage: 'Company Stage',
-  role_impact: 'Role Impact',
-  long_term_value: 'Long-term Value',
-  visa_feasibility: 'Visa Feasibility',
-}
-
-const DIMENSION_ORDER = [
-  'role_match',
-  'skills_alignment',
-  'experience_level',
-  'growth_trajectory',
-  'culture_fit',
-  'compensation',
-  'location_fit',
-  'company_stage',
-  'role_impact',
-  'long_term_value',
+const URL_STAGES = [
+  { text: 'Fetching job listing…',                  progress: 12 },
+  { text: 'Analysing requirements…',                progress: 38 },
+  { text: 'Scoring fit across 10 dimensions…',      progress: 68 },
+  { text: 'Generating recommendations…',            progress: 90 },
 ]
 
-const GRADE_CONFIG = {
-  A: { color: 'text-[#22C55E]', bg: 'bg-[#22C55E]/10', border: 'border-[#22C55E]/20', label: 'Excellent match' },
-  B: { color: 'text-[#0EA5E9]', bg: 'bg-[#0EA5E9]/10', border: 'border-[#0EA5E9]/20', label: 'Strong match' },
-  C: { color: 'text-[#F59E0B]', bg: 'bg-[#F59E0B]/10', border: 'border-[#F59E0B]/20', label: 'Moderate match' },
-  D: { color: 'text-[#F97316]', bg: 'bg-[#F97316]/10', border: 'border-[#F97316]/20', label: 'Weak match' },
-  F: { color: 'text-[#EF4444]', bg: 'bg-[#EF4444]/10', border: 'border-[#EF4444]/20', label: 'Poor match' },
+const PASTE_STAGES = [
+  { text: 'Parsing job description…',               progress: 15 },
+  { text: 'Analysing requirements…',                progress: 42 },
+  { text: 'Scoring fit across 10 dimensions…',      progress: 72 },
+  { text: 'Generating recommendations…',            progress: 90 },
+]
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function isUrl(val: string): boolean {
+  try { return ['http:', 'https:'].includes(new URL(val.trim()).protocol) }
+  catch { return false }
 }
 
-const RECOMMENDATION_CONFIG = {
-  apply: { label: 'Apply now', color: 'bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/20' },
-  consider: { label: 'Worth considering', color: 'bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/20' },
-  not_yet: { label: 'Not yet ready', color: 'bg-[#F97316]/10 text-[#F97316] border-[#F97316]/20' },
-  dont_apply: { label: "Don't apply", color: 'bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/20' },
+function delay(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms))
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function ScoreBar({ score }: { score: number }) {
-  const pct = ((score - 1) / 4) * 100
-  const color =
-    score >= 4.0 ? 'bg-[#22C55E]'
-    : score >= 3.0 ? 'bg-[#F59E0B]'
-    : 'bg-[#EF4444]'
-
+function ProgressBar({ progress }: { progress: number }) {
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex-1 h-1.5 bg-[#E8E4DD] rounded-full overflow-hidden">
-        <div
-          className={cn('h-full rounded-full transition-all duration-700', color)}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="text-xs font-mono font-semibold text-[#0A1628] w-7 text-right">
-        {score.toFixed(1)}
-      </span>
+    <div className="h-[2px] w-full bg-[#E8E4DD] rounded-full overflow-hidden mt-4">
+      <div
+        className="h-full bg-[#0EA5E9] rounded-full transition-all duration-700 ease-out"
+        style={{ width: `${progress}%` }}
+      />
     </div>
   )
 }
 
-function FormField({
-  label,
-  icon: Icon,
-  required,
-  children,
-}: {
-  label: string
-  icon: React.ElementType
-  required?: boolean
-  children: React.ReactNode
-}) {
+function StageLine({ text, visible }: { text: string; visible: boolean }) {
   return (
-    <div className="space-y-1.5">
-      <label className="flex items-center gap-1.5 text-sm font-medium text-[#0A1628]">
-        <Icon size={13} className="text-[#0A1628]/40" />
-        {label}
-        {required && <span className="text-[#EF4444] text-xs">*</span>}
-      </label>
-      {children}
-    </div>
+    <p
+      className={cn(
+        'text-sm text-[#0A1628]/50 text-center transition-all duration-400',
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1',
+      )}
+      style={{ transitionDuration: '400ms' }}
+    >
+      {text}
+    </p>
   )
 }
-
-const inputCls =
-  'w-full rounded-lg border border-[#E8E4DD] bg-white px-3.5 py-2.5 text-sm text-[#0A1628] placeholder:text-[#0A1628]/30 focus:outline-none focus:ring-2 focus:ring-[#0EA5E9]/40 focus:border-[#0EA5E9] transition-colors'
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function EvaluatePage() {
-  // Form state
-  const [jobTitle, setJobTitle] = useState('')
-  const [company, setCompany] = useState('')
-  const [jobDescription, setJobDescription] = useState('')
-  const [location, setLocation] = useState('')
-  const [salary, setSalary] = useState('')
-  const [jobUrl, setJobUrl] = useState('')
-  const [showOptional, setShowOptional] = useState(false)
+  const router = useRouter()
 
-  // Evaluation state
+  // Input state
+  const [inputVal, setInputVal] = useState('')
+  const [showTextarea, setShowTextarea] = useState(false)
+  const [pasteText, setPasteText] = useState('')
+  const [urlFlash, setUrlFlash] = useState(false)
+
+  // Fallback state (URL scrape failed)
+  const [fallbackMsg, setFallbackMsg] = useState<string | null>(null)
+
+  // Loading state
   const [loading, setLoading] = useState(false)
+  const [stageText, setStageText] = useState('')
+  const [stageVisible, setStageVisible] = useState(false)
+  const [progress, setProgress] = useState(0)
+
+  // Error state
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<EvaluationResult | null>(null)
 
-  const resultsRef = useRef<HTMLDivElement>(null)
+  // Page fade-out on navigation
+  const [leaving, setLeaving] = useState(false)
 
-  const canSubmit = jobTitle.trim() && company.trim() && jobDescription.trim().length >= 100
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const stageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!canSubmit || loading) return
+  // Cleanup stage timer on unmount
+  useEffect(() => {
+    return () => {
+      if (stageTimerRef.current) clearTimeout(stageTimerRef.current)
+    }
+  }, [])
 
-    setLoading(true)
-    setError(null)
-    setResult(null)
+  // ── Stage animation ─────────────────────────────────────────────────────────
 
-    try {
-      const res = await fetch('/api/evaluate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobTitle: jobTitle.trim(),
-          company: company.trim(),
-          jobDescription: jobDescription.trim(),
-          location: location.trim() || undefined,
-          salary: salary.trim() || undefined,
-          jobUrl: jobUrl.trim() || undefined,
-        }),
-      })
+  const runStages = useCallback((
+    stages: typeof URL_STAGES,
+    onStageChange: (idx: number) => void,
+  ) => {
+    let idx = 0
+    function next() {
+      if (idx >= stages.length) return
+      onStageChange(idx)
+      idx++
+      stageTimerRef.current = setTimeout(next, 2_800)
+    }
+    next()
+  }, [])
 
-      const json = await res.json()
+  const showStage = useCallback((stages: typeof URL_STAGES, idx: number) => {
+    setStageVisible(false)
+    setTimeout(() => {
+      setStageText(stages[idx].text)
+      setProgress(stages[idx].progress)
+      setStageVisible(true)
+    }, 200)
+  }, [])
 
-      if (!res.ok) {
-        setError(json.error ?? 'Evaluation failed. Please try again.')
-        return
-      }
+  // ── URL paste flash ─────────────────────────────────────────────────────────
 
-      setResult(json.data)
-      setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
-    } catch {
-      setError('Network error. Please check your connection and try again.')
-    } finally {
-      setLoading(false)
+  function handleUrlPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const pasted = e.clipboardData.getData('text')
+    if (isUrl(pasted)) {
+      setUrlFlash(true)
+      setTimeout(() => setUrlFlash(false), 220)
     }
   }
 
-  const grade = result ? GRADE_CONFIG[result.grade] : null
-  const rec = result ? RECOMMENDATION_CONFIG[result.recommendation] : null
+  // ── Expand textarea ─────────────────────────────────────────────────────────
+
+  function handleToggleTextarea() {
+    setShowTextarea((v) => {
+      if (!v) setTimeout(() => textareaRef.current?.focus(), 50)
+      return !v
+    })
+    setFallbackMsg(null)
+  }
+
+  // ── Submit ───────────────────────────────────────────────────────────────────
+
+  const handleSubmit = useCallback(async (e: React.SyntheticEvent) => {
+    e.preventDefault()
+    if (loading) return
+
+    const urlMode = isUrl(inputVal)
+    const textMode = pasteText.trim().length >= 50
+    if (!urlMode && !textMode) return
+
+    setLoading(true)
+    setError(null)
+    setFallbackMsg(null)
+    setProgress(0)
+    setStageVisible(false)
+
+    const stages = urlMode ? URL_STAGES : PASTE_STAGES
+    runStages(stages, (idx) => showStage(stages, idx))
+
+    try {
+      let listing: JobListing
+
+      // ── Step 1: extract job data ──────────────────────────────────────────
+      if (urlMode) {
+        const scrapeRes = await fetch('/api/scrape-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: inputVal.trim() }),
+        })
+
+        if (!scrapeRes.ok) {
+          const json = await scrapeRes.json()
+          if (scrapeRes.status === 422 && json.fallbackRequired) {
+            // Graceful: expand textarea with amber message
+            if (stageTimerRef.current) clearTimeout(stageTimerRef.current)
+            setLoading(false)
+            setStageVisible(false)
+            setProgress(0)
+            setFallbackMsg("We couldn't access that URL. Paste the job description below instead.")
+            setShowTextarea(true)
+            setTimeout(() => textareaRef.current?.focus(), 100)
+            return
+          }
+          throw new Error(json.error ?? 'Failed to fetch job listing')
+        }
+
+        const scrapeJson = await scrapeRes.json()
+        listing = scrapeJson.data
+      } else {
+        const parseRes = await fetch('/api/parse-jd', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: pasteText.trim() }),
+        })
+        if (!parseRes.ok) {
+          const json = await parseRes.json()
+          throw new Error(json.error ?? 'Failed to parse job description')
+        }
+        const parseJson = await parseRes.json()
+        listing = parseJson.data
+      }
+
+      // ── Step 2: evaluate ──────────────────────────────────────────────────
+      const evalRes = await fetch('/api/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobTitle: listing.jobTitle,
+          company: listing.companyName,
+          jobDescription: listing.description,
+          location: listing.location ?? undefined,
+          salary: listing.salaryText ?? undefined,
+          jobUrl: listing.jobUrl ?? (urlMode ? inputVal.trim() : undefined),
+        }),
+      })
+
+      const evalJson = await evalRes.json()
+      if (!evalRes.ok) throw new Error(evalJson.error ?? 'Evaluation failed')
+
+      // ── Step 3: navigate ──────────────────────────────────────────────────
+      if (stageTimerRef.current) clearTimeout(stageTimerRef.current)
+      setProgress(100)
+      setStageVisible(false)
+      await delay(350)
+
+      const evalId = evalJson.data?.id
+      setLeaving(true)
+      await delay(300)
+      router.push(evalId ? `/evaluations/${evalId}` : '/evaluations')
+    } catch (err) {
+      if (stageTimerRef.current) clearTimeout(stageTimerRef.current)
+      setLoading(false)
+      setStageVisible(false)
+      setProgress(0)
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+    }
+  }, [loading, inputVal, pasteText, runStages, showStage, router])
+
+  // ── Derived ──────────────────────────────────────────────────────────────────
+
+  const urlMode = isUrl(inputVal)
+  const textMode = pasteText.trim().length >= 50
+  const canSubmit = (urlMode || textMode) && !loading
+
+  const inputBorderCls = urlFlash
+    ? 'border-[#0EA5E9]'
+    : 'border-[#1E3A5F] focus-within:border-[#0EA5E9]'
 
   return (
-    <div className="min-h-screen bg-[#FAFAF8]">
-      <div className="max-w-3xl mx-auto px-4 py-12 sm:px-6">
+    <div
+      className={cn(
+        'min-h-screen bg-[#FAFAF8] flex flex-col items-center justify-center px-4 py-20 transition-opacity duration-300',
+        leaving ? 'opacity-0' : 'opacity-100',
+      )}
+    >
+      <div className="w-full max-w-[640px]">
 
         {/* ── Header ── */}
-        <div className="mb-10">
-          <div className="inline-flex items-center gap-2 bg-[#0EA5E9]/5 border border-[#0EA5E9]/15 text-[#0EA5E9] text-xs font-semibold px-3 py-1.5 rounded-full mb-4 uppercase tracking-wide">
-            <Sparkles size={11} />
-            AI Evaluation Engine
-          </div>
-          <h1 className="text-3xl font-bold text-[#0A1628] tracking-tight mb-2">
-            Evaluate a Job
+        <div className="text-center mb-10">
+          <h1
+            className="text-[2.441rem] font-bold text-[#0A1628] leading-[1.1] tracking-tight mb-3"
+            style={{ fontFamily: 'Satoshi, DM Sans, sans-serif' }}
+          >
+            Evaluate a job
           </h1>
-          <p className="text-[#0A1628]/55 text-base">
-            Paste the job description and get a 10-dimension honest match score against your profile.
+          <p className="text-base text-[#0A1628]/50 leading-relaxed">
+            Paste a URL or job description and we&rsquo;ll score the fit
           </p>
         </div>
 
         {/* ── Form ── */}
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="bg-white rounded-2xl border border-[#E8E4DD] p-6 space-y-5">
-            <h2 className="text-sm font-semibold text-[#0A1628] uppercase tracking-wide">Job details</h2>
+        <form onSubmit={handleSubmit} noValidate className="space-y-3">
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <FormField label="Job title" icon={Briefcase} required>
-                <input
-                  type="text"
-                  value={jobTitle}
-                  onChange={(e) => setJobTitle(e.target.value)}
-                  placeholder="e.g. Senior Product Manager"
-                  className={inputCls}
-                  required
-                />
-              </FormField>
-
-              <FormField label="Company" icon={Building2} required>
-                <input
-                  type="text"
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  placeholder="e.g. Stripe"
-                  className={inputCls}
-                  required
-                />
-              </FormField>
-            </div>
-
-            <FormField label="Job description" icon={Briefcase} required>
-              <textarea
-                value={jobDescription}
-                onChange={(e) => setJobDescription(e.target.value)}
-                placeholder="Paste the full job description here. Include responsibilities, requirements, and any details about the role and company..."
-                rows={10}
-                className={cn(inputCls, 'resize-y min-h-[220px]')}
-                required
-              />
-              <div className="flex justify-between text-xs text-[#0A1628]/35 mt-1">
-                <span>{jobDescription.length < 100 ? `${100 - jobDescription.length} more characters needed` : 'Ready to evaluate'}</span>
-                <span>{jobDescription.length.toLocaleString()} / 15,000</span>
-              </div>
-            </FormField>
+          {/* URL input */}
+          <div
+            className={cn(
+              'flex items-center rounded-[12px] border-2 bg-white transition-colors duration-200 overflow-hidden',
+              inputBorderCls,
+            )}
+          >
+            <input
+              type="url"
+              value={inputVal}
+              onChange={(e) => setInputVal(e.target.value)}
+              onPaste={handleUrlPaste}
+              placeholder="https://…"
+              disabled={loading}
+              className="flex-1 h-[56px] px-5 text-[20px] text-[#0A1628] placeholder:text-[#0A1628]/25 bg-transparent focus:outline-none disabled:opacity-40"
+              aria-label="Job posting URL"
+              autoComplete="off"
+              spellCheck={false}
+            />
           </div>
 
-          {/* Optional fields */}
-          <div className="bg-white rounded-2xl border border-[#E8E4DD] overflow-hidden">
+          {/* Paste toggle */}
+          <div className="flex items-center gap-3 px-1">
+            <div className="flex-1 h-px bg-[#E8E4DD]" />
             <button
               type="button"
-              onClick={() => setShowOptional((v) => !v)}
-              className="w-full flex items-center justify-between px-6 py-4 text-sm font-medium text-[#0A1628]/60 hover:text-[#0A1628] hover:bg-[#FAFAF8] transition-colors"
+              onClick={handleToggleTextarea}
+              disabled={loading}
+              className="text-sm text-[#0EA5E9] hover:text-[#0A1628] transition-colors duration-150 flex-shrink-0 disabled:opacity-40"
             >
-              <span>Optional details (location, salary, job URL)</span>
-              {showOptional ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              {showTextarea ? 'Hide description' : 'Or paste the job description'}
             </button>
-            {showOptional && (
-              <div className="px-6 pb-6 space-y-5 border-t border-[#E8E4DD] pt-5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                  <FormField label="Location" icon={MapPin}>
-                    <input
-                      type="text"
-                      value={location}
-                      onChange={(e) => setLocation(e.target.value)}
-                      placeholder="e.g. London, UK / Remote"
-                      className={inputCls}
-                    />
-                  </FormField>
+            <div className="flex-1 h-px bg-[#E8E4DD]" />
+          </div>
 
-                  <FormField label="Salary / compensation" icon={DollarSign}>
-                    <input
-                      type="text"
-                      value={salary}
-                      onChange={(e) => setSalary(e.target.value)}
-                      placeholder="e.g. £65,000–£80,000"
-                      className={inputCls}
-                    />
-                  </FormField>
-                </div>
+          {/* Fallback amber message */}
+          {fallbackMsg && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-[#F59E0B]/25 bg-[#F59E0B]/8 px-4 py-3">
+              <AlertCircle size={15} className="text-[#F59E0B] flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-[#92400E]">{fallbackMsg}</p>
+            </div>
+          )}
 
-                <FormField label="Job URL" icon={Link2}>
-                  <input
-                    type="url"
-                    value={jobUrl}
-                    onChange={(e) => setJobUrl(e.target.value)}
-                    placeholder="https://..."
-                    className={inputCls}
-                  />
-                </FormField>
-              </div>
+          {/* Expandable textarea */}
+          <div
+            className={cn(
+              'overflow-hidden transition-all duration-300 ease-in-out',
+              showTextarea ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0',
+            )}
+          >
+            <textarea
+              ref={textareaRef}
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              placeholder="Paste the full job description — responsibilities, requirements, company overview…"
+              rows={8}
+              disabled={loading}
+              className={cn(
+                'w-full rounded-[12px] border-2 border-[#1E3A5F] bg-white px-5 py-4 text-base text-[#0A1628] placeholder:text-[#0A1628]/25',
+                'focus:outline-none focus:border-[#0EA5E9] resize-y min-h-[200px] transition-colors duration-200',
+                'disabled:opacity-40',
+              )}
+              aria-label="Job description text"
+            />
+            {pasteText.length > 0 && (
+              <p className="text-xs text-[#0A1628]/35 text-right mt-1 px-1">
+                {pasteText.length < 50
+                  ? `${50 - pasteText.length} more characters needed`
+                  : `${pasteText.length.toLocaleString()} characters`}
+              </p>
             )}
           </div>
 
           {/* Error */}
           {error && (
-            <div className="flex items-start gap-3 rounded-xl border border-[#EF4444]/20 bg-[#EF4444]/5 px-4 py-3">
-              <AlertCircle size={16} className="text-[#EF4444] flex-shrink-0 mt-0.5" />
+            <div className="flex items-start gap-2.5 rounded-xl border border-[#EF4444]/20 bg-[#EF4444]/5 px-4 py-3">
+              <AlertCircle size={15} className="text-[#EF4444] flex-shrink-0 mt-0.5" />
               <p className="text-sm text-[#EF4444]">{error}</p>
             </div>
           )}
 
-          {/* Submit */}
+          {/* Submit button */}
           <button
             type="submit"
-            disabled={!canSubmit || loading}
+            disabled={!canSubmit}
             className={cn(
-              'w-full flex items-center justify-center gap-2.5 rounded-xl px-6 py-3.5 text-sm font-semibold transition-all duration-200',
-              canSubmit && !loading
-                ? 'bg-[#0A1628] text-white hover:bg-[#0EA5E9] shadow-sm hover:shadow-md'
+              'w-full h-[56px] rounded-[12px] text-[18px] font-bold tracking-tight transition-all duration-200',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0EA5E9] focus-visible:ring-offset-2',
+              canSubmit
+                ? 'bg-[#0A1628] text-[#FAFAF8] hover:bg-[#2563A0] cursor-pointer'
                 : 'bg-[#E8E4DD] text-[#0A1628]/30 cursor-not-allowed',
             )}
+            style={{ fontFamily: 'Satoshi, DM Sans, sans-serif' }}
           >
             {loading ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Evaluating with AI…
-              </>
+              <span className="flex items-center justify-center gap-2.5">
+                <LoadingDots />
+                Evaluating
+              </span>
             ) : (
-              <>
-                <Sparkles size={15} />
-                Evaluate this role
-              </>
+              'Evaluate'
             )}
           </button>
+
+          {/* Progress stages */}
+          {loading && (
+            <div className="pt-1 space-y-2">
+              <ProgressBar progress={progress} />
+              <StageLine text={stageText} visible={stageVisible} />
+            </div>
+          )}
         </form>
 
-        {/* ── Loading state ── */}
-        {loading && (
-          <div className="mt-10 space-y-4">
-            <div className="bg-white rounded-2xl border border-[#E8E4DD] p-6">
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-12 h-12 rounded-xl bg-[#E8E4DD] animate-pulse" />
-                <div className="space-y-2 flex-1">
-                  <div className="h-4 bg-[#E8E4DD] rounded animate-pulse w-1/3" />
-                  <div className="h-3 bg-[#E8E4DD] rounded animate-pulse w-1/2" />
-                </div>
-              </div>
-              <div className="space-y-3">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div className="h-3 bg-[#E8E4DD] rounded animate-pulse w-28" />
-                    <div className="flex-1 h-1.5 bg-[#E8E4DD] rounded animate-pulse" />
-                    <div className="h-3 bg-[#E8E4DD] rounded animate-pulse w-8" />
-                  </div>
-                ))}
-              </div>
-            </div>
-            <p className="text-center text-xs text-[#0A1628]/40">
-              Running 10-dimension AI analysis…
-            </p>
-          </div>
-        )}
-
-        {/* ── Results ── */}
-        {result && !loading && (
-          <div ref={resultsRef} className="mt-10 space-y-6">
-
-            {/* Header card */}
-            <div className={cn(
-              'bg-white rounded-2xl border p-6',
-              grade?.border ?? 'border-[#E8E4DD]',
-            )}>
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-4">
-                  {/* Grade badge */}
-                  <div className={cn(
-                    'w-16 h-16 rounded-2xl border-2 flex items-center justify-center flex-shrink-0',
-                    grade?.bg,
-                    grade?.border,
-                  )}>
-                    <span className={cn('text-3xl font-bold font-mono', grade?.color)}>
-                      {result.grade}
-                    </span>
-                  </div>
-                  <div>
-                    <p className={cn('text-sm font-semibold mb-0.5', grade?.color)}>
-                      {grade?.label}
-                    </p>
-                    <p className="text-2xl font-bold text-[#0A1628] font-mono">
-                      {result.overallScore.toFixed(1)}
-                      <span className="text-sm font-normal text-[#0A1628]/40 ml-1">/ 5.0</span>
-                    </p>
-                  </div>
-                </div>
-
-                {/* Recommendation pill */}
-                <span className={cn(
-                  'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-semibold border',
-                  rec?.color,
-                )}>
-                  {result.recommendation === 'apply' && <CheckCircle2 size={14} />}
-                  {result.recommendation === 'consider' && <TrendingUp size={14} />}
-                  {result.recommendation === 'not_yet' && <ArrowRight size={14} />}
-                  {result.recommendation === 'dont_apply' && <AlertCircle size={14} />}
-                  {rec?.label}
-                </span>
-              </div>
-
-              {/* Summary */}
-              <p className="mt-5 text-sm text-[#0A1628]/70 leading-relaxed border-t border-[#E8E4DD] pt-4">
-                {result.evaluationSummary}
-              </p>
-            </div>
-
-            {/* Dimension scores */}
-            <div className="bg-white rounded-2xl border border-[#E8E4DD] p-6">
-              <h2 className="text-sm font-semibold text-[#0A1628] uppercase tracking-wide mb-5">
-                Score breakdown
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3.5">
-                {DIMENSION_ORDER.map((key) => {
-                  const score = result.scores[key]
-                  if (score === undefined) return null
-                  return (
-                    <div key={key}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-[#0A1628]/60">
-                          {DIMENSION_LABELS[key]}
-                        </span>
-                      </div>
-                      <ScoreBar score={score} />
-                    </div>
-                  )
-                })}
-                {result.requiresVisaSponsorship && result.scores.visa_feasibility !== undefined && (
-                  <div className="sm:col-span-2">
-                    <div className="h-px bg-[#E8E4DD] my-1" />
-                    <div className="mt-3">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-[#0A1628]/60">
-                          {DIMENSION_LABELS['visa_feasibility']}
-                        </span>
-                      </div>
-                      <ScoreBar score={result.scores.visa_feasibility} />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Location match */}
-            {result.locationMatch && (
-              <div className={cn(
-                'rounded-2xl border p-5 space-y-1',
-                result.locationMatch.isMatch
-                  ? 'bg-[#22C55E]/5 border-[#22C55E]/20'
-                  : 'bg-[#F97316]/5 border-[#F97316]/20',
-              )}>
-                <div className="flex items-center gap-2">
-                  <MapPin size={14} className={result.locationMatch.isMatch ? 'text-[#22C55E]' : 'text-[#F97316]'} />
-                  <span className="text-sm font-semibold text-[#0A1628]">Location</span>
-                  <span className={cn(
-                    'text-xs font-semibold px-2 py-0.5 rounded-full',
-                    result.locationMatch.isMatch ? 'bg-[#22C55E]/10 text-[#22C55E]' : 'bg-[#F97316]/10 text-[#F97316]',
-                  )}>
-                    {result.locationMatch.isMatch ? 'Match' : 'Mismatch'}
-                  </span>
-                </div>
-                <p className="text-xs text-[#0A1628]/60 pl-5">{result.locationMatch.detail}</p>
-              </div>
-            )}
-
-            {/* Gap report */}
-            {result.gapReport && (
-              <div className="bg-white rounded-2xl border border-[#E8E4DD] p-6">
-                <h2 className="text-sm font-semibold text-[#0A1628] uppercase tracking-wide mb-5">
-                  Gap analysis &amp; guidance
-                </h2>
-                <GapReport
-                  gapReport={result.gapReport}
-                  locationMatch={result.locationMatch ? {
-                    jobLocation: result.locationMatch.jobLocation,
-                    userTargets: result.locationMatch.userTargets,
-                    isMatch: result.locationMatch.isMatch,
-                    detail: result.locationMatch.detail,
-                  } : null}
-                  locationFitScore={result.scores['location_fit']}
-                />
-              </div>
-            )}
-
-            {/* Re-evaluate button */}
-            <button
-              type="button"
-              onClick={() => {
-                setResult(null)
-                window.scrollTo({ top: 0, behavior: 'smooth' })
-              }}
-              className="w-full rounded-xl border border-[#E8E4DD] bg-white px-6 py-3 text-sm font-medium text-[#0A1628]/60 hover:text-[#0A1628] hover:border-[#0EA5E9]/40 transition-colors"
-            >
-              Evaluate another role
-            </button>
-          </div>
+        {/* ── Footer note ── */}
+        {!loading && (
+          <p className="text-center text-xs text-[#0A1628]/30 mt-10">
+            Scored across 10 dimensions against your profile — not a generic ranking
+          </p>
         )}
       </div>
     </div>
+  )
+}
+
+// ─── Loading dots ─────────────────────────────────────────────────────────────
+
+function LoadingDots() {
+  return (
+    <span className="flex items-center gap-[3px]">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="w-1.5 h-1.5 rounded-full bg-[#FAFAF8]/70 animate-bounce"
+          style={{ animationDelay: `${i * 120}ms`, animationDuration: '900ms' }}
+        />
+      ))}
+    </span>
   )
 }
