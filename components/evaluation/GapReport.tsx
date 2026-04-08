@@ -1,6 +1,6 @@
 'use client'
 
-import { MapPin, ArrowRight, Compass } from 'lucide-react'
+import { MapPin, ArrowRight, Compass, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import type { GapReport as GapReportType, GrowthRoadmapItem } from '@/types/evaluation'
 
@@ -47,11 +47,10 @@ function ScorePill({ score }: { score: number }) {
 
 export function GapReport({ gapReport, locationMatch, growthRoadmap, locationFitScore }: GapReportProps) {
   const hasLocationGap = locationFitScore !== undefined && locationFitScore !== null && locationFitScore < 3.0
-  const locationGapInReport = gapReport.gaps.some((g) => g.dimension === 'location_fit')
 
   return (
     <div className="space-y-6">
-      {/* ── Location gap banner (prominent if score < 3.0) ── */}
+      {/* ── Location gap banner ── */}
       {hasLocationGap && locationMatch && !locationMatch.isMatch && (
         <div className="rounded-lg border border-[#F97316]/20 bg-[#F97316]/5 p-4 space-y-2">
           <div className="flex items-center gap-2">
@@ -70,7 +69,25 @@ export function GapReport({ gapReport, locationMatch, growthRoadmap, locationFit
         </div>
       )}
 
-      {/* ── Gaps list ── */}
+      {/* ── Strengths ── */}
+      {gapReport.strengths && gapReport.strengths.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#0A1628] mb-3 uppercase tracking-wide flex items-center gap-2">
+            <Zap size={13} className="text-[#22C55E]" />
+            Strengths
+          </h3>
+          <div className="space-y-2">
+            {gapReport.strengths.map((strength, i) => (
+              <div key={i} className="flex items-start gap-3 rounded-lg border border-[#E8E4DD] bg-white p-3.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#22C55E] flex-shrink-0 mt-1.5" />
+                <p className="text-sm text-[#0A1628]/80">{strength}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Gaps ── */}
       {gapReport.gaps.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-[#0A1628] mb-3 uppercase tracking-wide">
@@ -85,10 +102,10 @@ export function GapReport({ gapReport, locationMatch, growthRoadmap, locationFit
                   </span>
                   <ScorePill score={gap.score} />
                 </div>
-                <p className="text-sm text-[#0A1628]/70">{gap.issue}</p>
+                <p className="text-sm text-[#0A1628]/70">{gap.gap}</p>
                 <div className="flex gap-2 pt-1">
                   <ArrowRight size={14} className="text-[#0EA5E9] flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-[#0A1628]">{gap.actionableGuidance}</p>
+                  <p className="text-sm text-[#0A1628]">{gap.guidance}</p>
                 </div>
                 {gap.estimatedTimeToClose && (
                   <p className="text-xs text-[#0A1628]/40 pl-5">
@@ -101,20 +118,17 @@ export function GapReport({ gapReport, locationMatch, growthRoadmap, locationFit
         </div>
       )}
 
-      {/* ── Similar roles ── */}
-      {gapReport.similarRoles && gapReport.similarRoles.length > 0 && (
+      {/* ── Similar roles to search ── */}
+      {gapReport.similarRolesToSearch && gapReport.similarRolesToSearch.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-[#0A1628] mb-3 uppercase tracking-wide">
-            Roles you are ready for now
+            Roles to search instead
           </h3>
           <div className="space-y-2">
-            {gapReport.similarRoles.map((role, i) => (
-              <div key={i} className="flex items-start gap-3 rounded-lg border border-[#E8E4DD] bg-white p-3.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#22C55E] flex-shrink-0 mt-1.5" />
-                <div>
-                  <p className="text-sm font-medium text-[#0A1628]">{role.title}</p>
-                  <p className="text-xs text-[#0A1628]/60 mt-0.5">{role.reason}</p>
-                </div>
+            {gapReport.similarRolesToSearch.map((role, i) => (
+              <div key={i} className="flex items-center gap-3 rounded-lg border border-[#E8E4DD] bg-white p-3.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#0EA5E9] flex-shrink-0" />
+                <p className="text-sm font-medium text-[#0A1628]">{role}</p>
               </div>
             ))}
           </div>

@@ -21,8 +21,8 @@ export interface EvaluationDimensions {
 export interface GapItem {
   dimension: keyof EvaluationDimensions
   score: EvaluationScore
-  issue: string
-  actionableGuidance: string
+  gap: string              // what is missing or misaligned
+  guidance: string         // specific actionable steps
   estimatedTimeToClose: string | null
 }
 
@@ -34,7 +34,8 @@ export interface SimilarRole {
 
 export interface GapReport {
   gaps: GapItem[]
-  similarRoles: SimilarRole[]
+  strengths: string[]
+  similarRolesToSearch: string[]
   visaAlternatives?: VisaAlternative[]
   growthRoadmap?: GrowthRoadmapItem[] // Pro + Global only
 }

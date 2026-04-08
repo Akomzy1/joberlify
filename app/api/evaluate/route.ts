@@ -1,21 +1,33 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import anthropic, { CLAUDE_MODELS, CLAUDE_TIMEOUTS } from '@/lib/claude/client'
-import { buildEvaluateJobPrompt } from '@/lib/claude/prompts/evaluate-job'
+import { EVALUATE_SYSTEM_PROMPT, buildEvaluateJobPrompt } from '@/lib/claude/prompts/evaluate-job'
+import { calculateOverallScore, mapGrade, mapRecommendation, validateScores } from '@/lib/evaluation/calculate'
+import { SUBSCRIPTION_LIMITS } from '@/types/subscription'
 import type { UserProfile } from '@/types'
+import type { JobListing } from '@/types/JobListing'
+import type { EvaluationDimensions, GapReport } from '@/types/evaluation'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
+// ─── Subscription limits ──────────────────────────────────────────────────────
+
+const TIER_UPGRADE_MESSAGES: Record<string, string> = {
+  free: 'You have used all 3 free evaluations this month. Upgrade to Pro for 30 evaluations/month.',
+  pro: 'You have used all 30 Pro evaluations this month. Upgrade to Global for unlimited evaluations.',
+  global: 'Monthly evaluation limit reached. Contact support if you believe this is an error.',
+}
+
+// ─── Route ────────────────────────────────────────────────────────────────────
+
 export async function POST(request: Request) {
-  // ── Auth ─────────────────────────────────────────────────────────────────────
+  // ── Auth ──────────────────────────────────────────────────────────────────
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // ── Parse body ────────────────────────────────────────────────────────────────
+  // ── Parse body ────────────────────────────────────────────────────────────
   let body: {
     jobTitle: string
     company: string
@@ -23,6 +35,8 @@ export async function POST(request: Request) {
     salary?: string
     location?: string
     jobUrl?: string
+    // Full listing can be passed directly from the scraper
+    listing?: JobListing
   }
   try {
     body = await request.json()
@@ -30,73 +44,123 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { jobTitle, company, jobDescription, salary, location, jobUrl } = body
+  // Accept either a pre-structured JobListing or raw fields
+  const listing: JobListing = body.listing ?? {
+    jobUrl: body.jobUrl?.trim() || null,
+    jobTitle: body.jobTitle?.trim() ?? '',
+    companyName: body.company?.trim() ?? '',
+    location: body.location?.trim() || null,
+    salaryText: body.salary?.trim() || null,
+    salaryMin: null,
+    salaryMax: null,
+    salaryCurrency: null,
+    description: body.jobDescription?.trim() ?? '',
+    requirements: [],
+    niceToHaves: [],
+    applicationDeadline: null,
+    scrapedAt: new Date().toISOString(),
+    sourceType: 'pasted',
+  }
 
-  if (!jobTitle?.trim()) return NextResponse.json({ error: 'jobTitle is required' }, { status: 400 })
-  if (!company?.trim()) return NextResponse.json({ error: 'company is required' }, { status: 400 })
-  if (!jobDescription?.trim()) return NextResponse.json({ error: 'jobDescription is required' }, { status: 400 })
-  if (jobDescription.length > 15_000) {
+  if (!listing.jobTitle) return NextResponse.json({ error: 'jobTitle is required' }, { status: 400 })
+  if (!listing.companyName) return NextResponse.json({ error: 'company is required' }, { status: 400 })
+  if (!listing.description) return NextResponse.json({ error: 'jobDescription is required' }, { status: 400 })
+  if (listing.description.length > 15_000) {
     return NextResponse.json({ error: 'Job description exceeds 15,000 character limit' }, { status: 400 })
   }
 
-  // ── Load user profile ─────────────────────────────────────────────────────────
-  const { data: profileData, error: profileError } = await supabase
-    .from('user_profiles')
-    .select('*')
-    .eq('user_id', user.id)
-    .single()
+  // ── Load user + profile in parallel ──────────────────────────────────────
+  const [userRow, profileRow] = await Promise.all([
+    supabase.from('users').select('subscription_tier, evaluations_used_this_month').eq('id', user.id).single(),
+    supabase.from('user_profiles').select('*').eq('user_id', user.id).single(),
+  ])
 
-  if (profileError || !profileData) {
+  if (userRow.error || !userRow.data) {
+    return NextResponse.json({ error: 'User account not found.' }, { status: 404 })
+  }
+  if (profileRow.error || !profileRow.data) {
+    return NextResponse.json({ error: 'Profile not found. Please complete onboarding first.' }, { status: 404 })
+  }
+
+  const tier = (userRow.data.subscription_tier ?? 'free') as 'free' | 'pro' | 'global'
+  const limits = SUBSCRIPTION_LIMITS[tier as keyof typeof SUBSCRIPTION_LIMITS]
+
+  // ── Subscription limit check ──────────────────────────────────────────────
+  if (limits.evaluationsPerMonth !== 'unlimited') {
+    // Count evaluations created this calendar month (more reliable than stored counter)
+    const monthStart = new Date()
+    monthStart.setDate(1)
+    monthStart.setHours(0, 0, 0, 0)
+
+    const { count } = await supabase
+      .from('evaluations')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .gte('created_at', monthStart.toISOString())
+
+    if ((count ?? 0) >= limits.evaluationsPerMonth) {
+      return NextResponse.json(
+        {
+          error: TIER_UPGRADE_MESSAGES[tier] ?? 'Monthly evaluation limit reached.',
+          code: 'LIMIT_EXCEEDED',
+          tier,
+          limit: limits.evaluationsPerMonth,
+        },
+        { status: 403 },
+      )
+    }
+  }
+
+  // ── Build user profile ────────────────────────────────────────────────────
+  const pd = profileRow.data
+
+  // ── CV check — require CV for personalised scoring ────────────────────────
+  if (!pd.cv_parsed_data) {
     return NextResponse.json(
-      { error: 'Profile not found. Please complete onboarding first.' },
-      { status: 404 },
+      {
+        error: 'Upload your CV first for personalised scoring.',
+        code: 'CV_REQUIRED',
+      },
+      { status: 400 },
     )
   }
 
   const userProfile: UserProfile = {
-    id: profileData.id,
-    userId: profileData.user_id,
-    fullName: profileData.full_name,
-    nationality: profileData.nationality,
-    currentCountry: profileData.current_country,
-    currentCity: profileData.current_city,
-    targetCountries: profileData.target_countries ?? [],
-    targetLocations: profileData.target_locations ?? [],
-    remotePreference: profileData.remote_preference ?? 'open',
-    willingnessToRelocate: profileData.willingness_to_relocate ?? true,
-    maxCommuteMiles: profileData.max_commute_miles ?? null,
-    requiresVisaSponsorship: profileData.requires_visa_sponsorship ?? false,
-    currentVisaStatus: profileData.current_visa_status ?? null,
-    preferredJobTypes: profileData.preferred_job_types ?? [],
-    preferredSalaryMin: profileData.preferred_salary_min ?? null,
-    preferredSalaryCurrency: profileData.preferred_salary_currency ?? null,
-    cvParsedData: profileData.cv_parsed_data ?? null,
-    cvUploadedAt: profileData.cv_uploaded_at ?? null,
-    cvFileUrl: profileData.raw_cv_url ?? null,
-    skills: profileData.skills ?? [],
-    qualifications: profileData.qualifications ?? [],
-    linkedinUrl: profileData.linkedin_url ?? null,
-    createdAt: profileData.created_at,
-    updatedAt: profileData.updated_at,
+    id: pd.id,
+    userId: pd.user_id,
+    fullName: pd.full_name,
+    nationality: pd.nationality,
+    currentCountry: pd.current_country,
+    currentCity: pd.current_city,
+    targetCountries: pd.target_countries ?? [],
+    targetLocations: pd.target_locations ?? [],
+    remotePreference: pd.remote_preference ?? 'open',
+    willingnessToRelocate: pd.willingness_to_relocate ?? true,
+    maxCommuteMiles: pd.max_commute_miles ?? null,
+    requiresVisaSponsorship: pd.requires_visa_sponsorship ?? false,
+    currentVisaStatus: pd.current_visa_status ?? null,
+    preferredJobTypes: pd.preferred_job_types ?? [],
+    preferredSalaryMin: pd.preferred_salary_min ?? null,
+    preferredSalaryCurrency: pd.preferred_salary_currency ?? null,
+    cvParsedData: pd.cv_parsed_data,
+    cvUploadedAt: pd.cv_uploaded_at ?? null,
+    cvFileUrl: pd.raw_cv_url ?? null,
+    skills: pd.skills ?? [],
+    qualifications: pd.qualifications ?? [],
+    linkedinUrl: pd.linkedin_url ?? null,
+    createdAt: pd.created_at,
+    updatedAt: pd.updated_at,
   }
 
-  // Enrich skills from parsed CV if top-level skills are sparse
-  if (userProfile.skills.length === 0 && userProfile.cvParsedData?.skills?.length) {
-    userProfile.skills = userProfile.cvParsedData.skills.slice(0, 20)
+  // Enrich top-level skills from CV if sparse
+  if (userProfile.skills.length === 0) {
+    userProfile.skills = userProfile.cvParsedData?.skills?.slice(0, 25) ?? []
   }
 
   const includeVisa = userProfile.requiresVisaSponsorship
 
-  // ── Build prompt + call Claude ────────────────────────────────────────────────
-  const prompt = buildEvaluateJobPrompt({
-    jobTitle: jobTitle.trim(),
-    company: company.trim(),
-    jobDescription: jobDescription.trim(),
-    salary: salary?.trim() || null,
-    location: location?.trim() || null,
-    userProfile,
-    includeVisa,
-  })
+  // ── Build prompt and call Claude ──────────────────────────────────────────
+  const userPrompt = buildEvaluateJobPrompt({ listing, userProfile, includeVisa })
 
   let aiResponseText = ''
   try {
@@ -104,7 +168,8 @@ export async function POST(request: Request) {
       {
         model: CLAUDE_MODELS.sonnet,
         max_tokens: 4096,
-        messages: [{ role: 'user', content: prompt }],
+        system: EVALUATE_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userPrompt }],
       },
       { timeout: CLAUDE_TIMEOUTS.evaluation },
     )
@@ -116,90 +181,102 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'AI evaluation failed. Please try again.' }, { status: 502 })
   }
 
-  // ── Parse AI JSON ─────────────────────────────────────────────────────────────
+  // ── Parse AI JSON ─────────────────────────────────────────────────────────
   const cleaned = aiResponseText
     .replace(/^```(?:json)?\n?/m, '')
     .replace(/\n?```$/m, '')
     .trim()
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let parsed: any
+  let ai: any
   try {
-    parsed = JSON.parse(cleaned)
+    ai = JSON.parse(cleaned)
   } catch {
     console.error('[evaluate] Invalid JSON from Claude:', cleaned.slice(0, 500))
     return NextResponse.json({ error: 'AI returned an invalid response. Please try again.' }, { status: 502 })
   }
 
-  if (!parsed.scores || !parsed.overall_score || !parsed.grade || !parsed.recommendation || !parsed.evaluation_summary) {
+  // ── Validate scores ───────────────────────────────────────────────────────
+  if (!ai.scores) {
+    return NextResponse.json({ error: 'AI evaluation incomplete (missing scores). Please try again.' }, { status: 502 })
+  }
+
+  const scoreError = validateScores(ai.scores)
+  if (scoreError) {
+    console.error('[evaluate] Score validation failed:', scoreError)
     return NextResponse.json({ error: 'AI evaluation incomplete. Please try again.' }, { status: 502 })
   }
 
-  // ── Map gap_report: snake_case → camelCase ────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let gapReport: any = null
-  if (parsed.gap_report) {
-    const gr = parsed.gap_report
-    gapReport = {
-      gaps: (gr.gaps ?? []).map((g: any) => ({
-        dimension: g.dimension,
-        score: g.score,
-        issue: g.issue,
-        actionableGuidance: g.actionable_guidance,
-        estimatedTimeToClose: g.estimated_time_to_close ?? null,
-      })),
-      similarRoles: (gr.similar_roles ?? []).map((r: any) => ({
-        title: r.title,
-        reason: r.reason,
-        suggestedSocCode: r.suggested_soc_code ?? undefined,
-      })),
-      visaAlternatives:
-        gr.visa_alternatives && gr.visa_alternatives.length > 0
-          ? gr.visa_alternatives.map((va: any) => ({
-              socCode: va.soc_code,
-              socTitle: va.soc_title,
-              reason: va.reason,
-              visaRoute: va.visa_route,
-            }))
-          : undefined,
-    }
+  // ── Recalculate server-side (don't blindly trust AI arithmetic) ────────────
+  const scores = ai.scores as EvaluationDimensions
+  const overallScore = calculateOverallScore(scores)
+  const grade = mapGrade(overallScore)
+  const gatePassFailed = scores.role_match < 2.0 || scores.skills_alignment < 2.0
+  const recommendation = mapRecommendation(overallScore, {
+    visaFeasibility: includeVisa ? scores.visa_feasibility : null,
+    gatePassFailed,
+  })
+
+  // ── Build gap report (store in camelCase for TypeScript consumers) ─────────
+  const gapReport: GapReport = {
+    gaps: (ai.gaps ?? []).map((g: any) => ({
+      dimension: g.dimension,
+      score: scores[g.dimension as keyof EvaluationDimensions] ?? g.score,
+      gap: g.gap ?? g.issue ?? '',
+      guidance: g.guidance ?? g.actionable_guidance ?? '',
+      estimatedTimeToClose: g.estimated_time_to_close ?? null,
+    })),
+    strengths: Array.isArray(ai.strengths) ? ai.strengths.map(String) : [],
+    similarRolesToSearch: Array.isArray(ai.similar_roles_to_search)
+      ? ai.similar_roles_to_search.map(String)
+      : [],
+    visaAlternatives:
+      includeVisa && Array.isArray(ai.visa_alternatives) && ai.visa_alternatives.length > 0
+        ? ai.visa_alternatives.map((va: any) => ({
+            socCode: va.soc_code,
+            socTitle: va.soc_title,
+            reason: va.reason,
+            visaRoute: va.visa_route,
+          }))
+        : undefined,
   }
 
-  const locationMatchRaw = parsed.location_match
-  const locationMatch = locationMatchRaw
+  const locationMatch = ai.location_match
     ? {
-        jobLocation: locationMatchRaw.job_location,
-        userTargets: locationMatchRaw.user_targets,
-        isMatch: locationMatchRaw.is_match,
-        detail: locationMatchRaw.detail,
+        jobLocation: String(ai.location_match.job_location ?? ''),
+        userTargets: String(ai.location_match.user_targets ?? ''),
+        isMatch: Boolean(ai.location_match.is_match),
+        detail: String(ai.location_match.detail ?? ''),
       }
     : null
 
-  // ── Persist to DB ─────────────────────────────────────────────────────────────
-  const { data: evalData, error: evalError } = await supabase
+  const evaluationSummary: string = ai.summary ?? ai.evaluation_summary ?? ''
+
+  // ── Persist to DB ─────────────────────────────────────────────────────────
+  const { data: evalRow, error: evalError } = await supabase
     .from('evaluations')
     .insert({
       user_id: user.id,
-      job_url: jobUrl?.trim() || null,
-      job_title: jobTitle.trim(),
-      company_name: company.trim(),
-      location: location?.trim() || null,
-      job_description: jobDescription.trim(),
-      score_role_match: parsed.scores.role_match,
-      score_skills_alignment: parsed.scores.skills_alignment,
-      score_experience_level: parsed.scores.experience_level,
-      score_growth_trajectory: parsed.scores.growth_trajectory,
-      score_culture_fit: parsed.scores.culture_fit,
-      score_compensation: parsed.scores.compensation,
-      score_location_fit: parsed.scores.location_fit,
-      score_company_stage: parsed.scores.company_stage,
-      score_role_impact: parsed.scores.role_impact,
-      score_long_term_value: parsed.scores.long_term_value,
-      score_visa_feasibility: includeVisa ? (parsed.scores.visa_feasibility ?? null) : null,
-      overall_score: parsed.overall_score,
-      grade: parsed.grade,
-      recommendation: parsed.recommendation,
-      evaluation_summary: parsed.evaluation_summary,
+      job_url: listing.jobUrl,
+      job_title: listing.jobTitle,
+      company_name: listing.companyName,
+      location: listing.location,
+      job_description: listing.description,
+      score_role_match: scores.role_match,
+      score_skills_alignment: scores.skills_alignment,
+      score_experience_level: scores.experience_level,
+      score_growth_trajectory: scores.growth_trajectory,
+      score_culture_fit: scores.culture_fit,
+      score_compensation: scores.compensation,
+      score_location_fit: scores.location_fit,
+      score_company_stage: scores.company_stage,
+      score_role_impact: scores.role_impact,
+      score_long_term_value: scores.long_term_value,
+      score_visa_feasibility: includeVisa ? (scores.visa_feasibility ?? null) : null,
+      overall_score: overallScore,
+      grade,
+      recommendation,
+      evaluation_summary: evaluationSummary,
       gap_report: gapReport,
       growth_roadmap: null,
       requires_visa_sponsorship_at_eval: includeVisa,
@@ -207,35 +284,52 @@ export async function POST(request: Request) {
     .select('id')
     .single()
 
+  // Increment usage counter (non-blocking — fire and forget)
+  supabase
+    .from('users')
+    .update({ evaluations_used_this_month: (userRow.data.evaluations_used_this_month ?? 0) + 1 })
+    .eq('id', user.id)
+    .then(() => {})
+
   if (evalError) {
     console.error('[evaluate] DB insert error:', evalError.message)
-    // Return the result even if we couldn't save — user gets value, we lose persistence
     return NextResponse.json(
       {
         warning: 'Evaluation completed but could not be saved to history.',
-        data: buildResponsePayload(null, parsed, gapReport, locationMatch, includeVisa),
+        data: buildPayload(null, scores, overallScore, grade, recommendation, evaluationSummary, gapReport, locationMatch, includeVisa),
       },
       { status: 200 },
     )
   }
 
   return NextResponse.json(
-    { data: buildResponsePayload(evalData.id, parsed, gapReport, locationMatch, includeVisa) },
+    { data: buildPayload(evalRow.id, scores, overallScore, grade, recommendation, evaluationSummary, gapReport, locationMatch, includeVisa) },
     { status: 200 },
   )
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildResponsePayload(id: string | null, parsed: any, gapReport: any, locationMatch: any, includeVisa: boolean) {
+// ─── Response payload ─────────────────────────────────────────────────────────
+
+function buildPayload(
+  id: string | null,
+  scores: EvaluationDimensions,
+  overallScore: number,
+  grade: string,
+  recommendation: string,
+  evaluationSummary: string,
+  gapReport: GapReport,
+  locationMatch: { jobLocation: string; userTargets: string; isMatch: boolean; detail: string } | null,
+  requiresVisaSponsorship: boolean,
+) {
   return {
     id,
-    scores: parsed.scores,
-    overallScore: parsed.overall_score,
-    grade: parsed.grade,
-    recommendation: parsed.recommendation,
-    evaluationSummary: parsed.evaluation_summary,
-    locationMatch,
+    scores,
+    overallScore,
+    grade,
+    recommendation,
+    evaluationSummary,
     gapReport,
-    requiresVisaSponsorship: includeVisa,
+    locationMatch,
+    requiresVisaSponsorship,
   }
 }
