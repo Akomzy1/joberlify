@@ -217,10 +217,10 @@ function CitySection({ countryCode, location, onChange }: { countryCode: string;
 
 function RemoteSegmentedControl({ value, onChange }: { value: RemotePreference; onChange: (v: RemotePreference) => void }) {
   return (
-    <div className="flex rounded-lg border border-[#E8E4DD] overflow-hidden bg-[#F5F3EF] p-0.5 gap-0.5">
+    <div className="grid grid-cols-2 sm:flex rounded-lg border border-[#E8E4DD] overflow-hidden bg-[#F5F3EF] p-0.5 gap-0.5">
       {REMOTE_OPTIONS.map((opt) => (
         <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
-          className={cn('flex-1 py-2 text-xs font-medium rounded transition-all duration-200 whitespace-nowrap',
+          className={cn('flex-1 min-h-[44px] py-2 px-2 text-xs font-medium rounded transition-all duration-200 whitespace-nowrap',
             value === opt.value ? 'bg-[#1E3A5F] text-[#FAFAF8] shadow-sm' : 'text-[#0A1628]/60 hover:text-[#0A1628] hover:bg-[#E8E4DD]')}>
           {opt.label}
         </button>
@@ -558,7 +558,7 @@ function SaveButton({ saving, saved, onClick }: { saving: boolean; saved: boolea
       <button
         type="button" onClick={onClick} disabled={saving}
         className={cn(
-          'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200',
+          'flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold transition-all duration-200',
           saved
             ? 'bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/20'
             : 'bg-[#1E3A5F] text-[#FAFAF8] hover:bg-[#0EA5E9]',

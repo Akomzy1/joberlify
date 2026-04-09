@@ -111,6 +111,25 @@ export async function POST(request: Request) {
     }
   }
 
+  // ── Per-minute rate limit (max 10 evaluations/min) ────────────────────────
+  const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString()
+  const { count: recentCount } = await supabase
+    .from('evaluations')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .gte('created_at', oneMinuteAgo)
+
+  if ((recentCount ?? 0) >= 10) {
+    return NextResponse.json(
+      {
+        error: 'Too many requests. You can run up to 10 evaluations per minute — wait a moment and try again.',
+        code: 'RATE_LIMITED',
+        retryAfter: 60,
+      },
+      { status: 429 },
+    )
+  }
+
   // ── Build user profile ────────────────────────────────────────────────────
   const pd = profileRow.data
 
@@ -177,8 +196,28 @@ export async function POST(request: Request) {
     if (content.type !== 'text') throw new Error('Unexpected response type from Claude')
     aiResponseText = content.text.trim()
   } catch (err) {
-    console.error('[evaluate] Claude error:', err)
-    return NextResponse.json({ error: 'AI evaluation failed. Please try again.' }, { status: 502 })
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === 'APITimeoutError' ||
+        err.name === 'AbortError' ||
+        err.message.toLowerCase().includes('timeout'))
+    console.error('[evaluate] Claude error:', {
+      name: err instanceof Error ? err.name : 'unknown',
+      message: err instanceof Error ? err.message : String(err),
+    })
+    if (isTimeout) {
+      return NextResponse.json(
+        {
+          error: 'The evaluation is taking longer than usual. Please try again.',
+          code: 'TIMEOUT',
+        },
+        { status: 504 },
+      )
+    }
+    return NextResponse.json(
+      { error: 'AI evaluation temporarily unavailable. Please try again in a moment.' },
+      { status: 502 },
+    )
   }
 
   // ── Parse AI JSON ─────────────────────────────────────────────────────────

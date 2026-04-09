@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Menu, X, ChevronDown, LogOut, Settings, User } from 'lucide-react'
+import { Menu, X, ChevronDown, LogOut, Settings } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { cn } from '@/lib/utils/cn'
@@ -16,8 +16,10 @@ const AUTH_NAV_LINKS = [
 ]
 
 const PUBLIC_NAV_LINKS = [
+  { href: '/features', label: 'Features' },
   { href: '/sponsors', label: 'Sponsors' },
-  { href: '/pricing', label: 'Pricing' },
+  { href: '/blog',     label: 'Blog'     },
+  { href: '/pricing',  label: 'Pricing'  },
 ]
 
 function getInitials(name: string | null | undefined, email: string | null | undefined): string {

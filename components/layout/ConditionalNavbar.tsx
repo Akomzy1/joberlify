@@ -4,7 +4,8 @@ import { usePathname } from 'next/navigation'
 import { Navbar } from './Navbar'
 
 // Routes where the main nav should not appear
-const HIDE_ON: string[] = ['/login', '/signup', '/onboarding']
+// '/' uses its own PublicNavbar with scroll-aware transparency
+const HIDE_ON: string[] = ['/', '/login', '/signup', '/onboarding']
 
 export function ConditionalNavbar() {
   const pathname = usePathname()

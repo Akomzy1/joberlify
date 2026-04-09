@@ -81,7 +81,7 @@ export default function EvaluatePage() {
   const [progress, setProgress] = useState(0)
 
   // Error state
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ message: string; isTimeout?: boolean } | null>(null)
 
   // Page fade-out on navigation
   const [leaving, setLeaving] = useState(false)
@@ -179,7 +179,17 @@ export default function EvaluatePage() {
             setLoading(false)
             setStageVisible(false)
             setProgress(0)
-            setFallbackMsg("We couldn't access that URL. Paste the job description below instead.")
+            const reason: string = json.reason ?? ''
+            const isNonJobContent =
+              reason.includes('non_job') ||
+              reason.includes('not_job') ||
+              reason.includes('blocked') ||
+              reason.includes('paywall')
+            setFallbackMsg(
+              isNonJobContent
+                ? "This doesn't look like a job listing. Try pasting the job description directly."
+                : "We couldn't access that URL. Paste the job description below instead.",
+            )
             setShowTextarea(true)
             setTimeout(() => textareaRef.current?.focus(), 100)
             return
@@ -218,7 +228,14 @@ export default function EvaluatePage() {
       })
 
       const evalJson = await evalRes.json()
-      if (!evalRes.ok) throw new Error(evalJson.error ?? 'Evaluation failed')
+      if (!evalRes.ok) {
+        const isTimeout = evalRes.status === 504 || evalJson.code === 'TIMEOUT'
+        const err = Object.assign(
+          new Error(evalJson.error ?? 'Evaluation failed'),
+          { isTimeout },
+        )
+        throw err
+      }
 
       // ── Step 3: navigate ──────────────────────────────────────────────────
       if (stageTimerRef.current) clearTimeout(stageTimerRef.current)
@@ -235,7 +252,9 @@ export default function EvaluatePage() {
       setLoading(false)
       setStageVisible(false)
       setProgress(0)
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+      const isTimeout = err instanceof Error && !!(err as Error & { isTimeout?: boolean }).isTimeout
+      const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.'
+      setError({ message, isTimeout })
     }
   }, [loading, inputVal, pasteText, runStages, showStage, router])
 
@@ -349,9 +368,19 @@ export default function EvaluatePage() {
 
           {/* Error */}
           {error && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-[#EF4444]/20 bg-[#EF4444]/5 px-4 py-3">
+            <div className="flex items-start gap-2.5 rounded-xl border border-[#EF4444]/20 bg-[#EF4444]/5 px-4 py-3.5">
               <AlertCircle size={15} className="text-[#EF4444] flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-[#EF4444]">{error}</p>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-[#EF4444]">{error.message}</p>
+                {error.isTimeout && (
+                  <button
+                    type="submit"
+                    className="mt-1.5 text-xs font-semibold text-[#EF4444]/70 hover:text-[#EF4444] underline underline-offset-2 transition-colors"
+                  >
+                    Retry evaluation →
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

@@ -29,6 +29,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'No file provided. Include a "file" field in the form data.' }, { status: 400 })
   }
 
+  // ── Server-side file validation ────────────────────────────────────────────
+  if (file.size === 0) {
+    return NextResponse.json(
+      { error: "We couldn't read this file. Try a different version.", code: 'EMPTY_FILE' },
+      { status: 400 },
+    )
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    return NextResponse.json(
+      { error: 'Please upload a CV under 5MB.', code: 'FILE_TOO_LARGE' },
+      { status: 400 },
+    )
+  }
+  const fileExt = file.name.split('.').pop()?.toLowerCase()
+  if (!['pdf', 'doc', 'docx'].includes(fileExt ?? '')) {
+    return NextResponse.json(
+      { error: 'We accept PDF and DOCX files only.', code: 'INVALID_FORMAT' },
+      { status: 400 },
+    )
+  }
+
   // ── Extract text ───────────────────────────────────────────────────────────
   let rawText: string
   try {

@@ -265,6 +265,21 @@ export function CvUploader({ initialData, onConfirm, onSkip }: CvUploaderProps) 
   )
 
   async function handleFile(file: File) {
+    // ── Client-side validation ────────────────────────────────────────────────
+    if (file.size === 0) {
+      setState({ status: 'error', message: "We couldn't read this file. Try a different version." })
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setState({ status: 'error', message: 'Please upload a CV under 5MB.' })
+      return
+    }
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (!['pdf', 'doc', 'docx'].includes(ext ?? '')) {
+      setState({ status: 'error', message: 'We accept PDF and DOCX files only.' })
+      return
+    }
+
     setState({ status: 'uploading', progress: 0 })
 
     // Simulate upload progress while we fetch

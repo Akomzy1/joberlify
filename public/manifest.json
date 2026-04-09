@@ -1,0 +1,66 @@
+{
+  "name": "Joberlify — AI Job Search Intelligence",
+  "short_name": "Joberlify",
+  "description": "Evaluate job fit across 10 dimensions, generate tailored CVs, and check UK visa sponsorship eligibility. AI-powered job search intelligence.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0A1628",
+  "theme_color": "#1E3A5F",
+  "lang": "en-GB",
+  "categories": ["productivity", "business", "utilities"],
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "apple touch icon"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Evaluate a Job",
+      "short_name": "Evaluate",
+      "description": "Paste a job description and get an AI fit score",
+      "url": "/evaluate",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "My Pipeline",
+      "short_name": "Pipeline",
+      "description": "View and manage your application pipeline",
+      "url": "/pipeline",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Sponsor Directory",
+      "short_name": "Sponsors",
+      "description": "Search 120,000+ UK visa sponsors",
+      "url": "/sponsors",
+      "icons": [{ "src": "/icon.svg", "sizes": "any" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/opengraph-image",
+      "sizes": "1200x630",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Joberlify — AI-Powered Job Search Intelligence"
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
+}

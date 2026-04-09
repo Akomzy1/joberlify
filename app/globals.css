@@ -241,3 +241,15 @@ h1, h2, h3, h4, h5, h6 {
 .animate-count-up {
   animation: countUp 0.6s ease-out both;
 }
+
+/* ─── iOS Safari Zoom Prevention ─────────────────────────────────────────────
+   iOS Safari auto-zooms when input font-size < 16px. Force 16px on mobile
+   for all interactive text fields while keeping visual sizing via transforms.
+   ─────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
